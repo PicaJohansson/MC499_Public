@@ -1,0 +1,256 @@
+---
+title: "2011"
+output: html_document
+---
+# SUMMARY STATS 
+Extented keywords - 412 terms
+
+SF duplicate values (2%)
+TW duplicate values (3%)
+
+TW_DFM  75,035 documents, 494,526 features (>99.99% sparse) // ntype 1251368   ntoken 1279218   mean tokens 17
+TOP TERMS:   new       law     illeg        uk       job    worker    seeker   illegal       get australia  
+       
+SF_DFM . Document-feature matrix of: 15,140 documents, 112,035 features (100.0% sparse).// ntype 278419   ntoken 285268 mean tokens 19
+TOP TERMS : white non-whit    illeg      jew   muslim   nation    black    world    europ     mass      
+
+
+```{r}
+library("writexl")
+library(quanteda)
+library(dplyr)
+library(lubridate)
+library(stringr)
+library(stringi)
+library(tidytext)
+library(tidyverse)
+library(ggplot2)
+```
+
+# STORMFRONT DATA + TWEETS
+
+```{r}
+perspective_scores <- read.csv("~/Documents/R/Dissertation/SAVED_DATA/perspective_scores_final.csv", stringsAsFactors = FALSE)
+perspective_scores$posteddate <- as.Date(perspective_scores$posteddate)
+perspective_scores <- perspective_scores %>% filter(TOXICITY > 0.4) # 29K left at 0.55 59K left at 0.4
+perspective_scores$month <- perspective_scores %>% mutate (month=(floor_date(posteddate, "month")))
+perspective_scores <- unique(perspective_scores$month)
+
+# Filtering perspective scores 
+perspective_scores_2011 <- perspective_scores %>% filter(year == 2011) %>% select(sents) %>% mutate(stormfront = 1) 
+perspective_scores_2012 <- perspective_scores %>% filter(year == 2012) %>% select(sents) %>% mutate(stormfront = 1)
+names(perspective_scores_2011)[1] <- "text"
+names(perspective_scores_2012)[1] <- "text"
+
+SF_2011 <- rbind(perspective_scores_2011, perspective_scores_2012) 
+
+SF_2011$text <- gsub("#","", SF_2011$text) # Removing hashtags
+length(unique(SF_2011$text))/length(SF_2011$text)# 96% unique values
+SF_2011 <- unique(SF_2011) # keeping only unique values 
+
+Sample_2011 <- read.csv("~/Documents/R/Dissertation/SAVED_DATA/Tweets_2011_2020/Sample_2011.csv", stringsAsFactors = FALSE)
+Sample_2011 <- Sample_2011[!duplicated(Sample_2011[,c('text')]),]
+Sample_2011 <- dplyr::filter(Sample_2011, !grepl('white house', text, ignore.case = TRUE))
+Sample_2011 <- Sample_2011 %>% group_by(month) %>% sample_frac(0.5)
+
+Sample_2011$text <- gsub("#","", Sample_2011$text) # Removing hashtags
+Sample_2011 <- Sample_2011 %>% select(month, text)
+Sample_2011$id <- paste('text', 1:nrow(Sample_2011), sep="") 
+TW_2011 <- Sample_2011
+
+rm(perspective_scores, Sample_2011, perspective_scores_2011, perspective_scores_2012)
+
+# POS TAGGING
+pos_preposition <- parts_of_speech %>% filter(pos == "Preposition")
+pos_conjunction <- parts_of_speech %>% filter(pos == "Conjunction")
+pos_def_article <- parts_of_speech %>% filter(pos == "Definite Article")
+pos_pronoun <- parts_of_speech %>% filter(pos == "Pronoun")
+
+extended_stopwords <- c(pos_preposition$word, pos_conjunction$word, pos_def_article$word, pos_pronoun$word)
+extended_stopwords <- unique(extended_stopwords) # 412 terms (31 AUGUST)
+
+rm(pos_conjunction, pos_def_article, pos_preposition, pos_pronoun)
+
+# DFM CREATION TW 
+TW_dfm_2011 <- TW_2011$text %>% corpus() %>%
+  tokens(remove_punct = TRUE, remove_numbers = TRUE, remove_symbols = TRUE) %>%
+  tokens_remove(c(stopwords("en"), extended_stopwords,  "immigrants", "immigration","immigrate", "immigrant", "refugees", "refugee", "migrant", "migrants", "asylum", "asylum seeker", "migration", "rt", "asylum seekers", "e2_u", "u_s", "e2", "u.", "u", "qt", "immigrant's", "immigrants", "immigrated", "migrated", "migrating", "imigrants", "migrate", "asylum", "seeker", "people", "country", "countries", "really", "years", "maybe", "going", "daily", "want", "called", "say", "things", "actually", "getting", "u.", "u")) %>% 
+  tokens_wordstem()  %>%
+  tokens_ngrams(n = 1:2) %>% # up to bigrams 
+  dfm()
+
+topfeatures(TW_dfm_2011)
+sum(ntype(TW_dfm_2011))
+sum(ntoken(TW_dfm_2011))
+mean(ntoken(TW_dfm_2011))
+
+```
+
+```{r}
+
+# DFM CREATION & FILTERING SF 
+SF_dfm_2011 <- SF_2011$text %>% corpus() %>%
+  tokens(remove_punct = TRUE, remove_numbers = TRUE, remove_symbols = TRUE) %>%
+  tokens_remove(c(stopwords("en"), extended_stopwords, "immigrants", "immigration", "immigrant", "immigrate", "refugees", "refugee", "migrant", "migrants", "migration", "asylum seeker", "rt", "asylum seekers", "e2_u", "u_s", "e2", "u.", "u", "etc", "like", "example", "youtube", "just", "also", "even", "simply", "qt", "immigrant's", "immigrants", "immigrated", "migrated", "migrating", "imigrants", "migrate", "asylum", "seeker", "people", "country", "countries", "really", "years", "maybe", "going", "daily", "want", "called", "say", "things", "actually", "getting", "u.", "u", "vdare", "premier")) %>% 
+  tokens_wordstem() %>%
+  tokens_ngrams(n = 1:2) %>% # up to bigrams 
+  tokens_remove(c("u.", "u", "online", "third", "s_okay", "don_t", "t")) %>%
+  dfm()
+
+topfeatures(SF_dfm_2011)
+sum(ntype(SF_dfm_2011))
+sum(ntoken(SF_dfm_2011))
+mean(ntoken(SF_dfm_2011))
+
+```
+
+```{r}
+
+# Checking how many documents in each DFM
+ndoc(TW_dfm_2011) # 205920
+ndoc(SF_dfm_2011) # 20820
+
+# Creating vector with docvars 
+twitter_11 <- rep(0, ndoc(TW_dfm_2011))  # replace 3 with length of total Twitter documents
+stormfront_11 <- rep(1, ndoc(SF_dfm_2011)) # replace 2 with length of total SF documents
+docvar_vector_11 <- c(twitter_11, stormfront_11)
+number_vector <- c(1:length(docvar_vector_11))
+
+dfm_all_2011 <- rbind(TW_dfm_2011, SF_dfm_2011) # first twitter then stormfront
+
+# Setting docvars 
+docvars(dfm_all_2011, "Stormfront") <- docvar_vector_11
+docvars(dfm_all_2011, "Number") <- number_vector
+#```
+
+#```{r}
+rm(stormfront_11, number_vector, docvar_vector_11, SF_dfm_2011, TW_dfm_2011, SF_2011)
+#```
+
+# APPLYING KEYNESS STATISIC
+
+#```{r}
+# Applying keyness statistic
+keyn_2011 <- dfm_group(dfm_all_2011, groups = "Stormfront") %>%
+    textstat_keyness(measure = "chi2", target = "1") 
+
+term_table_2011 <- head(keyn_2011, 100)
+write_xlsx(term_table_2011,"~/Documents/R/Dissertation/SAVED_DATA/perspective_scores_final.csv\\term_table_2011.xlsx")
+
+POS_keyness_plot_2011 <- textplot_keyness(keyn_2011, color = c("black", "gray"), n = 40, show_legend = FALSE, labelsize = 2.5) + 
+  theme(legend.position = "none", panel.background = element_rect(fill = "gray97", color = "gray97"), axis.title.x = element_text(color="gray50", size=7, margin = margin(t = 0, r = 20, b = 0, l = 0)), axis.text = element_text(size=6.5))
+
+ggsave("FINAL_keyness_2011.png", plot = POS_keyness_plot_2011, width = 30, height = 20, units = "cm")
+
+keyn_significant_2011 <- keyn_2011 %>% filter (p < 0.01) # 21,000 terms 
+rm(keyn_2011)
+
+head(keyn_significant_2011, 100)
+
+
+```
+
+```{r}
+
+# Removing negative chi-2 (these are the values that have features prominent to the reference corpus)
+keyn_significant_2011 <- keyn_significant_2011 %>% filter(chi2 > 0) 
+keyn_significant_2011 <- keyn_significant_2011 %>% filter(n_reference >= 1) #  - mention at least 1 in reference corpus 
+keyn_significant_2011 <- keyn_significant_2011 %>% filter(n_target >= 5) # 2,700 - mention at least 2 or more times - made smaller because smaller corpus
+
+keyn_significant_2011$index <- 1:nrow(keyn_significant_2011)
+plot_density_2 <- ggplot(keyn_significant_2011, aes(x=index, y=chi2)) + 
+  geom_point(shape = 21, color = "#1D91C0", size = 1.5) +
+  theme(legend.position = "none", panel.background = element_rect(fill = "gray97", color = "gray97"), axis.title.y = element_text(color="gray50", size=9, margin = margin(t = 0, r = 20, b = 0, l = 0)), axis.text = element_text(size=9), axis.title.x = element_text(size = 9, color = "gray50", margin = margin(t = 0, r = 20, b = 0, l = 0)))
+
+ggsave("plot_density_2011.png", plot = plot_density_2, width = 30, height = 20, units = "cm")
+
+# DICTIONARY CREATION / APPLICATION
+
+# Creating dictionary 
+terms_2011 <- as.vector(keyn_significant_2011$feature)
+dictionary_2011 <- dictionary(list(WS = terms_2011))
+
+# Add a separate dictionary for hatebase terms?
+
+# Create subset dfm with only Tweet data 
+subset_twitter_2011 <- dfm_subset(dfm_all_2011, Stormfront == 0)
+rm(dfm_all_2011)
+
+# Checking what words are in the dictionary 
+dict_lookup_2011 <- dfm(subset_twitter_2011, select = dictionary_2011, verbose = FALSE)
+
+# Converting to dataframe
+dict_df_2011 <- as.data.frame(dict_lookup_2011)
+rm(dict_lookup_2011, dictionary_2011, doc_id, perspective_scores_2014, subset_twitter_2011, term_table_2011, twitter_11, extended_stopwords)
+```
+
+# ADDING WEIGHTS BY CHI-SQUARED VALUE
+
+```{r}
+# Creating duplicate of the keyness significant and ordering it alphabetically 
+keyn_sig_dup <- keyn_significant_2011  # each row is a feature with a chi2 - RUN AGAIN WITHOUT FILTERING
+nrow(keyn_sig_dup) # 3,383
+#keyn_sig_dup <- keyn_sig_dup %>% filter(n_target > 5)
+keyn_sig_dup <- keyn_sig_dup[order(keyn_sig_dup$feature),]  # 
+rm(keyn_significant_2011)
+
+# Assigning weight to its own vector
+keyn_sig_dup$weight <- keyn_sig_dup$chi2/100
+
+# Creating duplicate of the dfm and ordering it alphabetically 
+dict_df_2011_dup <- dict_df_2011 
+ncol(dict_df_2011_dup) # this has 3,384 
+rm(dict_df_2011)
+dict_df_2011_dup <- dict_df_2011_dup[,order(colnames(dict_df_2011_dup))] # each column is a term  
+terms <- keyn_sig_dup$feature # vector of terms 
+
+# Adding colnames (features) to a vector 
+colnames_dup <- colnames(dict_df_2011_dup) 
+
+# Checking the doc_id column and then dropping it 
+keyn_sig_dup <- keyn_sig_dup %>% filter(feature %in% colnames_dup)
+weight <- keyn_sig_dup$weight # of length same as dict_df_2011_dup at this point
+doc_id <- dict_df_2011_dup %>% select(doc_id)
+nrow(keyn_sig_dup)
+dict_df_2011_dup <- dict_df_2011_dup %>% select(-doc_id)
+
+# Multiplying by the chi_2 vector 
+#test_df <- t(t(dict_df_2011_dup[,1:50])*weight[1:50]) #small test - this is a matrix 
+#test_df %>% as.data.frame() %>% select(ability) %>% arrange(desc(ability))
+#test_df_2 <- as.data.frame(test_df)
+#test_df_2 %>% select(ability) %>% arrange(desc(ability))
+#rm(test_df, test_df_2)
+
+# Weighting matrix 
+final_matrix_2011 <- (t(t(dict_df_2011_dup)*weight))
+rm(dict_df_2011_dup)
+#nth(weight, 36)
+final_df_2011 <- as.data.frame(final_matrix_2011)
+#final_df_2011 %>% select(activism) %>% arrange(desc(activism))
+rm(final_matrix_2011)
+
+# Binding rows with doc id to finalized df with only weighted terms
+final_df_2011 <- cbind(doc_id, final_df_2011)
+frac_final_df_2011 <- final_df_2011 %>% mutate(sum = rowSums(final_df_2011[,2:ncol(final_df_2011)]))
+frac_final_df_2011 <- frac_final_df_2011 %>% top_frac(0.01)
+quantile(frac_final_df_2011$sum)
+
+# Get ID from matched documents 
+doc_id_matches_2011 <- frac_final_df_2011$doc_id
+
+text_output_2011 <- TW_2011 %>% filter(id %in% doc_id_matches_2011) 
+
+write.csv(text_output_2011, "text_output_2011.csv")
+
+# Look at sample from extracted text 
+TW_2011 %>% filter(id %in% doc_id_matches_2011) %>% pull(text) %>% sample(20)
+
+# ARRANGE BY TOP SUMS AND PRINT 20
+
+top_20 <- frac_final_df_2011 %>% arrange(desc(sum)) %>% select(doc_id) %>% head(20) 
+top_20 <- top_20$doc_id
+
+TW_2011 %>% filter(id %in% top_20) %>% pull(text) 
+
+
+```
